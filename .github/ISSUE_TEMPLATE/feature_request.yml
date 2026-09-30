@@ -1,0 +1,20 @@
+name: Feature request
+description: Suggest an idea for Byre.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the problem or workflow, not only the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Workarounds you use today, other tools that do this well, screenshots.

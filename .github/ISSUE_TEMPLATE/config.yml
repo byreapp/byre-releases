@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://byre.app/docs
+    about: Setup guides and answers to common questions.
+  - name: Report a security problem
+    url: https://github.com/byreapp/byre-releases/security/advisories/new
+    about: Report it privately, not in a public issue.

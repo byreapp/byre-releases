@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in Byre isn't working.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create a PostgreSQL 17 server on port 5433
+        2. Start it
+        3. …
+    validations:
+      required: true
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Database engine
+      options:
+        - PostgreSQL
+        - MySQL / MariaDB
+        - MongoDB
+        - Redis / Valkey
+        - SQLite / Turso
+        - Not engine-specific
+    validations:
+      required: true
+  - type: textarea
+    id: version
+    attributes:
+      label: Version info
+      description: In Byre, open Settings → About → Copy version info, and paste it here.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste error messages or drag in screenshots. Remove passwords and other secrets first.
