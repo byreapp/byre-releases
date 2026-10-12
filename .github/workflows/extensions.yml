@@ -67,7 +67,8 @@ jobs:
     runs-on: ${{ matrix.target.os }}
     env:
       EXT: ${{ matrix.ext }}
-      PLATFORM: ${{ matrix.target.platform }}
+      # Not PLATFORM: msvc-dev-cmd sets that to "x64" on Windows.
+      BYRE_PLATFORM: ${{ matrix.target.platform }}
       TRIPLE: ${{ matrix.target.triple }}
     defaults:
       run:
@@ -84,8 +85,8 @@ jobs:
           repo=$(jq -r .source <<<"$ext")
           build=$(jq -r '.build // "pgxs"' <<<"$ext")
           mkdir -p dist
-          if ! jq -e --arg p "$PLATFORM" '.platforms | index($p)' <<<"$ext" >/dev/null; then
-            echo "$EXT isn't built for $PLATFORM"; exit 0
+          if ! jq -e --arg p "$BYRE_PLATFORM" '.platforms | index($p)' <<<"$ext" >/dev/null; then
+            echo "$EXT isn't built for $BYRE_PLATFORM"; exit 0
           fi
           # Tags are v1.2.3 for most projects, bare 1.2.3 for some (hypopg, timescaledb).
           mkdir src
@@ -138,7 +139,7 @@ jobs:
             comm -13 <(echo "$before") <(echo "$after") > added.txt
             mkdir out && tar cf - -C "$root" -T added.txt | tar xf - -C out
             ls out/lib/* out/share/extension/"$EXT".control >/dev/null # fail if nothing was built
-            tar czf "dist/$EXT-$ver-pg$m-$PLATFORM.tar.gz" -C out lib share
+            tar czf "dist/$EXT-$ver-pg$m-$BYRE_PLATFORM.tar.gz" -C out lib share
           done
           ls -l dist
       - uses: actions/upload-artifact@v4
