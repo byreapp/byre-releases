@@ -125,11 +125,13 @@ jobs:
               # OPTFLAGS="": no -march=native, so it runs on any CPU of the arch.
               # PG_SYSROOT: theseus' pg_config names its CI's Xcode SDK path.
               # $ORIGIN rpath: extensions linking libpq (pg_cron) find the bundled one.
+              # Compiler = the one theseus built with (its CFLAGS carry gcc-only
+              # flags on Linux, which -Werror projects like pg_cron trip over).
               extra=()
-              [ "$RUNNER_OS" = macOS ] && extra+=("PG_SYSROOT=$(xcrun --show-sdk-path)")
+              [ "$RUNNER_OS" = macOS ] && extra+=(CC=clang "PG_SYSROOT=$(xcrun --show-sdk-path)")
               [ "$RUNNER_OS" = Linux ] && extra+=('PG_LDFLAGS=-Wl,-rpath,$$ORIGIN')
               make -C "$src" PG_CONFIG="$cfg" clean >/dev/null # objects from the previous major
-              make -C "$src" PG_CONFIG="$cfg" CC=clang OPTFLAGS="" "${extra[@]}" -j4
+              make -C "$src" PG_CONFIG="$cfg" OPTFLAGS="" "${extra[@]}" -j4
               make -C "$src" PG_CONFIG="$cfg" install
             fi
             after=$(cd "$root" && find lib share/extension -type f | sort)

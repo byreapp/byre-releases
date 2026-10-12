@@ -135,9 +135,7 @@
       "version": "2.30.2",
       "source": "https://github.com/timescale/timescaledb",
       "build": "cmake",
-      "majors": [
-        "15",
-        "16",
+      "majors": ["16",
         "17",
         "18"
       ],
