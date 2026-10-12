@@ -25,4 +25,4 @@ Please don't report security problems in a public issue. Use [private vulnerabil
 
 ---
 
-This repository holds releases and issues only. Byre's source code is not public.
+This repository holds releases, issues and the build of the Postgres extensions Byre downloads (`extensions.json`, `.github/workflows/extensions.yml`). Byre's source code is not public.
