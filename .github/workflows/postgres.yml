@@ -32,7 +32,8 @@ jobs:
               base="https://github.com/theseus-rs/postgresql-binaries/releases/download/$exact"
               curl -fsSL "$base/$f" -o "dl/$f"
               curl -fsSL "$base/$f.sha256" -o "dl/$f.sha256"
-              (cd dl && echo "$(awk '{print $1}' "$f.sha256")  $f" | sha256sum -c -)
+              # The Windows .sha256 is certutil output, so take the 64-hex token from either format.
+              (cd dl && echo "$(grep -oiE '[0-9a-f]{64}' "$f.sha256" | head -1)  $f" | sha256sum -c -)
             done
             gh release create "$tag" dl/* --prerelease --latest=false \
               --title "PostgreSQL $exact (server binaries for Byre)" \
