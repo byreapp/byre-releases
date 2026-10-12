@@ -32,6 +32,19 @@ body:
         - Not engine-specific
     validations:
       required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS (Apple silicon)
+        - macOS (Intel)
+        - Windows
+        - Linux (AppImage)
+        - Linux (.deb)
+        - Linux (.rpm)
+    validations:
+      required: true
   - type: textarea
     id: version
     attributes:

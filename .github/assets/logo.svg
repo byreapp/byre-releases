@@ -1,0 +1,26 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Byre app icon: a shaded database drum with a lightning bolt. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1A2233"/>
+      <stop offset="1" stop-color="#07090E"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8FC8FF"/>
+      <stop offset="0.45" stop-color="#2B8BFF"/>
+      <stop offset="1" stop-color="#0A3FA8"/>
+    </linearGradient>
+    <linearGradient id="lid" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#E6F3FF"/>
+      <stop offset="1" stop-color="#8CC4FF"/>
+    </linearGradient>
+  </defs>
+  <rect x="112" y="112" width="800" height="800" rx="180" fill="url(#tile)"/>
+  <rect x="116" y="116" width="792" height="792" rx="176" fill="none" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="8"/>
+  <g transform="translate(112 112) scale(8) translate(50 50) scale(1.12) translate(-50 -50)">
+    <path d="M28 28v44a22 7 0 0 0 44 0V28Z" fill="url(#body)"/>
+    <ellipse cx="50" cy="28" rx="22" ry="7" fill="url(#lid)"/>
+    <path d="M28 44a22 7 0 0 0 44 0M28 58a22 7 0 0 0 44 0" fill="none" stroke="#062A70" stroke-opacity="0.5" stroke-width="2"/>
+    <path d="M54 38 41 57h9.5l-3.5 15 13-20h-9.5Z" fill="#FFB020" stroke="#07090E" stroke-width="2.5" stroke-linejoin="round" paint-order="stroke"/>
+  </g>
+</svg>
