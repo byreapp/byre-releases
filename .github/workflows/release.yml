@@ -1,0 +1,249 @@
+# Builds signed macOS, Windows and Linux bundles of the private byreapp/byre and publishes
+# them here, where the in-app updater polls latest.json. Lives in this public repo so
+# Actions minutes are free; byre's source is checked out with RELEASES_TOKEN and never
+# committed here. Public logs: no `set -x`, nothing that prints source files.
+#
+# Release: bump the version in byre's package.json, src-tauri/tauri.conf.json and
+# src-tauri/Cargo.toml (optionally write notes: scripts/release-notes.sh 0.2.0 --write,
+# then edit CHANGELOG.md) and merge the PR to byre's main. byre's release.yml then
+# dispatches this workflow; an untagged version gets tagged in byre and released.
+# Running it by hand from the Actions tab does the same.
+#
+# Secrets (on this repo): TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD,
+# the APPLE_* signing/notarization set, RELEASES_TOKEN (fine-grained PAT, Contents read &
+# write on byre, byre-releases and homebrew-tap; Actions write on byre-releases
+# for byre's trigger), APT_GPG_PRIVATE_KEY (signs the apt
+# repository) and WINGET_TOKEN (classic PAT, public_repo, for winget-pkgs bump PRs; the
+# winget job skips without it). No pull_request triggers: forks must never reach secrets.
+name: Release
+
+on:
+  workflow_dispatch:
+
+concurrency: release
+
+permissions:
+  contents: read
+
+env:
+  RELEASES_REPO: byreapp/byre-releases
+  SOURCE_REPO: byreapp/byre
+
+jobs:
+  # The tag being released; empty when byre main's version is already tagged.
+  # API only, no checkout: a no-op run takes seconds.
+  tag:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - id: tag
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          sha=$(gh api "repos/$SOURCE_REPO/commits/main" --jq .sha)
+          v=$(gh api "repos/$SOURCE_REPO/contents/src-tauri/tauri.conf.json?ref=$sha" -H "Accept: application/vnd.github.raw" | jq -r .version)
+          if gh api "repos/$SOURCE_REPO/git/ref/tags/v$v" --silent 2>/dev/null; then
+            echo "v$v is already released"; exit 0
+          fi
+          gh api -X POST "repos/$SOURCE_REPO/git/refs" -f ref="refs/tags/v$v" -f sha="$sha" --silent
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+
+  draft:
+    needs: tag
+    if: needs.tag.outputs.tag != ''
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
+    outputs:
+      release_id: ${{ steps.create.outputs.id }}
+      notes: ${{ steps.create.outputs.notes }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          token: ${{ secrets.RELEASES_TOKEN }}
+          ref: ${{ needs.tag.outputs.tag }}
+          fetch-depth: 0 # tags + history for the automatic notes
+      - name: Create draft release
+        id: create
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          notes=$(scripts/release-notes.sh "${TAG#v}")
+          id=$(gh api -X POST "repos/$RELEASES_REPO/releases" \
+            -f tag_name="$TAG" -f target_commitish=main \
+            -f name="Byre ${TAG#v}" -f body="$notes" -F draft=true --jq .id)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          { echo "notes<<__NOTES__"; echo "$notes"; echo "__NOTES__"; } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [tag, draft]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          # Windows: NSIS installer + MSI. Not code-signed yet, so SmartScreen warns once.
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          # Linux: AppImage (what the updater uses), .deb and .rpm. 22.04 keeps the
+          # glibc floor low so the AppImage runs on older distros.
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          token: ${{ secrets.RELEASES_TOKEN }}
+          ref: ${{ needs.tag.outputs.tag }}
+      # Bundle the latest live catalog as the offline fallback and first-run seed
+      # of the app's SQLite catalog cache. Keeps the checked-in one if the fetch
+      # fails, or if the live one is older or lacks an engine this app supports
+      # (byre-binaries' catalog.json not yet updated for a new engine).
+      - name: Bundle live catalog
+        shell: bash
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/byreapp/byre-binaries/main/catalog.json -o live.json &&
+            jq -e --slurpfile own src-tauri/catalog.json \
+              '([$own[0].engines[].id] - [.engines[].id] | length == 0) and .updated >= $own[0].updated
+               and any(.engines[]; .id == "postgres" and (.versions | length > 0))' live.json >/dev/null &&
+            mv live.json src-tauri/catalog.json ||
+            echo "::warning::Live catalog not bundled (fetch failed, older, or missing an engine); using the checked-in one"
+      - name: Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          version: 12
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+      - run: pnpm install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS code signing + notarization (tauri-action only uses these on macOS runners).
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          owner: byreapp
+          repo: byre-releases
+          releaseId: ${{ needs.draft.outputs.release_id }}
+          # Only feeds latest.json's notes (the update dialog); the release body is set above.
+          releaseBody: ${{ needs.draft.outputs.notes }}
+          args: --target ${{ matrix.target }}
+
+  publish:
+    needs: [tag, draft, build]
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          token: ${{ secrets.RELEASES_TOKEN }}
+          ref: ${{ needs.tag.outputs.tag }}
+      # Fixed DMG names so byre.app can link to releases/latest/download/<name>.
+      # latest.json only references the .app.tar.gz bundles, so renaming is safe.
+      - name: Rename DMGs
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          gh api "repos/$RELEASES_REPO/releases/${{ needs.draft.outputs.release_id }}/assets" --jq '.[] | select(.name | endswith(".dmg")) | "\(.id) \(.name)"' |
+            while read -r id name; do
+              case "$name" in
+                *aarch64*) new=Byre-mac-apple-silicon.dmg ;;
+                *x64*) new=Byre-mac-intel.dmg ;;
+                *) continue ;;
+              esac
+              gh api -X PATCH "repos/$RELEASES_REPO/releases/assets/$id" -f name="$new" --silent
+            done
+      # apt: a signed flat repository (scripts/apt-repo.sh) next to the .deb, so releases/latest/download
+      # works as an apt source. Uploaded while still a draft, so latest never mixes two versions.
+      - name: apt repository
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+        run: |
+          release="repos/$RELEASES_REPO/releases/${{ needs.draft.outputs.release_id }}"
+          mkdir apt
+          gh api "$release/assets" --jq '.[] | select(.name | endswith("_amd64.deb")) | "\(.url) \(.name)"' |
+            while read -r url name; do gh api -H "Accept: application/octet-stream" "$url" > "apt/$name"; done
+          ls apt/*.deb
+          command -v apt-ftparchive || sudo apt-get install -y -q apt-utils
+          gpg --batch --import <<< "$APT_GPG_PRIVATE_KEY"
+          scripts/apt-repo.sh apt
+          upload=$(gh api "$release" --jq '.upload_url | sub("\\{.*"; "")')
+          for f in Packages Packages.gz Release InRelease byre.gpg; do
+            gh api -X POST "$upload?name=$f" -H "Content-Type: application/octet-stream" --input "apt/$f" --silent
+          done
+      # Publishing moves releases/latest, so installed apps only see complete releases.
+      - env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: gh api -X PATCH "repos/$RELEASES_REPO/releases/${{ needs.draft.outputs.release_id }}" -F draft=false -f make_latest=true
+      # brew install byreapp/tap/byre: point the cask at this release, sha256s from GitHub's asset digests.
+      - name: Bump Homebrew cask
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          sha() { gh release view "$TAG" -R "$RELEASES_REPO" --json assets --jq ".assets[] | select(.name == \"$1\") | .digest | ltrimstr(\"sha256:\")"; }
+          arm=$(sha Byre-mac-apple-silicon.dmg) intel=$(sha Byre-mac-intel.dmg)
+          [ -n "$arm" ] && [ -n "$intel" ] || { echo "::error::DMG digests missing"; exit 1; }
+          gh auth setup-git # git push below needs the token too
+          gh repo clone byreapp/homebrew-tap tap -- -q && cd tap
+          sed -i -E "s/^(  version )\"[^\"]*\"/\1\"${TAG#v}\"/; s/(arm: +)\"[0-9a-f]{64}\"/\1\"$arm\"/; s/(intel: +)\"[0-9a-f]{64}\"/\1\"$intel\"/" Casks/byre.rb
+          git diff --quiet && { echo "cask already at $TAG"; exit 0; }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "byre ${TAG#v}"
+          git push -q origin HEAD:main
+      # Record automatic notes in CHANGELOG.md, so every release has a section.
+      # A hand-written section is already there and is left alone.
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          token: ${{ secrets.RELEASES_TOKEN }}
+          ref: main
+          fetch-depth: 0
+      - name: Add notes to CHANGELOG.md
+        run: |
+          v=${TAG#v}
+          grep -q "^## $v\b" CHANGELOG.md && { echo "CHANGELOG.md already has $v"; exit 0; }
+          REF="$TAG" scripts/release-notes.sh "$v" --write
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "docs(changelog): Byre $v"
+          git push origin HEAD:main # to byre, via RELEASES_TOKEN
+
+  # winget install Byre.Byre: open the version-bump PR on microsoft/winget-pkgs. WINGET_TOKEN is a
+  # classic PAT (public_repo) of the account whose winget-pkgs fork the PR comes from.
+  winget:
+    needs: [tag, publish]
+    runs-on: windows-latest
+    steps:
+      - env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: |
+          if (-not $env:WINGET_TOKEN) { "WINGET_TOKEN not set, skipping"; exit 0 }
+          $v = $env:TAG.TrimStart('v')
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          .\wingetcreate.exe update Byre.Byre --version $v --urls "https://github.com/byreapp/byre-releases/releases/download/$env:TAG/Byre_${v}_x64-setup.exe" --submit --token $env:WINGET_TOKEN
